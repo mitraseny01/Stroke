@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>StrokeConnect — Chandigarh &amp; Punjab</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+<style>
+  :root{
+    --primary:#0f6e5f; --primary-dark:#0b5347; --accent:#e8674c;
+    --bg:#f6f8f7; --card:#ffffff; --border:#e2e8e6; --text:#1c2624; --muted:#6b7a76;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);}
+  header{background:var(--primary);color:#fff;padding:16px 24px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;}
+  header h1{margin:0;font-size:20px;}
+  header h1 span{font-weight:400;opacity:.85;font-size:13px;display:block;}
+  nav button{background:transparent;border:1px solid rgba(255,255,255,.5);color:#fff;padding:7px 14px;border-radius:6px;cursor:pointer;margin-left:8px;font-size:13px;}
+  nav button.active{background:#fff;color:var(--primary);font-weight:600;}
+  main{max-width:1080px;margin:0 auto;padding:24px;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:14px;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;}
+  .badge{display:inline-block;background:#e7f3f0;color:var(--primary-dark);border-radius:20px;padding:2px 10px;font-size:12px;margin:2px 4px 0 0;}
+  .btn{background:var(--primary);color:#fff;border:none;padding:9px 16px;border-radius:6px;cursor:pointer;font-size:14px;}
+  .btn:hover{background:var(--primary-dark);}
+  .btn.secondary{background:#fff;color:var(--primary);border:1px solid var(--primary);}
+  .btn.danger{background:#c0392b;}
+  .btn.small{padding:5px 10px;font-size:12px;}
+  input,select,textarea{width:100%;padding:9px 10px;border:1px solid var(--border);border-radius:6px;font-size:14px;margin-bottom:10px;font-family:inherit;}
+  label{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.03em;}
+  .filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;align-items:end;}
+  h2{margin-top:0;}
+  .muted{color:var(--muted);font-size:13px;}
+  .status{font-weight:600;padding:2px 8px;border-radius:12px;font-size:12px;}
+  .status.Pending{background:#fff3cd;color:#8a6d1a;}
+  .status.Accepted{background:#d4edda;color:#1e6b34;}
+  .status.Rejected{background:#f8d7da;color:#8a1f2b;}
+  .status.Completed{background:#dbe6ff;color:#20408a;}
+  .msg{padding:8px 10px;border-radius:8px;margin-bottom:6px;max-width:80%;font-size:13px;}
+  .msg.patient{background:#e7f3f0;margin-left:auto;text-align:right;}
+  .msg.provider{background:#f0f0f0;}
+  .toplink{background:none;border:none;color:var(--primary);cursor:pointer;font-size:13px;padding:0;text-decoration:underline;}
+  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50;}
+  .modal{background:#fff;border-radius:10px;max-width:520px;width:100%;max-height:85vh;overflow:auto;padding:22px;}
+  .error{color:#c0392b;font-size:13px;margin:-4px 0 10px;}
+  footer{text-align:center;color:var(--muted);font-size:12px;padding:30px 10px;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useCallback } = React;
+
+// ---- Config ----
+const API = "http://localhost:5000/api";
+
+// ---- Small API helper ----
+async function api(path, { method = "GET", body, token } = {}) {
+  const res = await fetch(`${API}${path}`, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || "Request failed");
+  return data;
+}
+
+// ---- Auth persisted in memory + localStorage-free (per-session) ----
+function useAuth() {
+  const [session, setSession] = useState(() => {
+    try {
+      const raw = sessionStorage.getItem("sc_session");
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  });
+  const login = (data) => {
+    sessionStorage.setItem("sc_session", JSON.stringify(data));
+    setSession(data);
+  };
+  const logout = () => {
+    sessionStorage.removeItem("sc_session");
+    setSession(null);
+  };
+  return { session, login, logout };
+}
+
+const SERVICE_OPTIONS = [
+  "Diagnosis", "Emergency / Acute Treatment", "Thrombolysis", "Neurosurgery",
+  "Rehabilitation", "Physiotherapy", "Speech Therapy", "Follow-up / OPD Consultation",
+];
+
+function Header({ view, setView, auth }) {
+  return (
+    <header>
+      <h1>StrokeConnect <span>Find &amp; connect with stroke-care providers · Chandigarh &amp; Punjab</span></h1>
+      <nav>
+        <button className={view === "search" ? "active" : ""} onClick={() => setView("search")}>Search</button>
+        {auth.session?.type === "patient" && (
+          <button className={view === "patientDashboard" ? "active" : ""} onClick={() => setView("patientDashboard")}>My Requests</button>
+        )}
+        {auth.session?.type === "provider" && (
+          <button className={view === "providerDashboard" ? "active" : ""} onClick={() => setView("providerDashboard")}>Provider Dashboard</button>
+        )}
+        {!auth.session && (
+          <>
+            <button className={view === "patientAuth" ? "active" : ""} onClick={() => setView("patientAuth")}>Patient / Caregiver Login</button>
+            <button className={view === "providerAuth" ? "active" : ""} onClick={() => setView("providerAuth")}>Provider Login</button>
+          </>
+        )}
+        {auth.session && <button onClick={auth.logout}>Log out ({auth.session.name})</button>}
+      </nav>
+    </header>
+  );
+}
+
+function ProviderCard({ p, onView }) {
+  return (
+    <div className="card">
+      <strong>{p.name}</strong>
+      <div className="muted">{p.type} · {p.city}, {p.state}</div>
+      <div style={{ margin: "8px 0" }}>
+        {p.services.slice(0, 4).map((s) => <span className="badge" key={s}>{s}</span>)}
+      </div>
+      <div className="muted" style={{ marginBottom: 10 }}>{p.specialization}</div>
+      <button className="btn small" onClick={() => onView(p)}>View &amp; Contact</button>
+    </div>
+  );
+}
+
+function SearchView({ auth, setView }) {
+  const [providers, setProviders] = useState([]);
+  const [cities, setCities] = useState([]);
+  const [city, setCity] = useState("");
+  const [service, setService] = useState("");
+  const [type, setType] = useState("");
+  const [q, setQ] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [selected, setSelected] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true); setError("");
+    try {
+      const params = new URLSearchParams();
+      if (city) params.set("city", city);
+      if (service) params.set("service", service);
+      if (type) params.set("type", type);
+      if (q) params.set("q", q);
+      const data = await api(`/providers?${params.toString()}`);
+      setProviders(data);
+    } catch (e) { setError(e.message); }
+    setLoading(false);
+  }, [city, service, type, q]);
+
+  useEffect(() => { api("/providers/meta/cities").then(setCities).catch(() => {}); }, []);
+  useEffect(() => { load(); }, [load]);
+
+  return (
+    <div>
+      <div className="card">
+        <h2>Find a stroke-care provider</h2>
+        <div className="filters">
+          <div>
+            <label>City</label>
+            <select value={city} onChange={(e) => setCity(e.target.value)}>
+              <option value="">All cities</option>
+              {cities.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label>Service needed</label>
+            <select value={service} onChange={(e) => setService(e.target.value)}>
+              <option value="">Any service</option>
+              {SERVICE_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div>
+            <label>Provider type</label>
+            <select value={type} onChange={(e) => setType(e.target.value)}>
+              <option value="">Any type</option>
+              <option>Hospital</option>
+              <option>Clinic</option>
+              <option>Rehabilitation Centre</option>
+              <option>Doctor</option>
+            </select>
+          </div>
+          <div>
+            <label>Search by name</label>
+            <input placeholder="e.g. PGIMER, Fortis..." value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
+        </div>
+      </div>
+
+      {error && <div className="error">{error}</div>}
+      {loading ? <p className="muted">Loading providers…</p> : (
+        <div className="grid">
+          {providers.map((p) => <ProviderCard key={p._id} p={p} onView={setSelected} />)}
+          {providers.length === 0 && <p className="muted">No providers match these filters yet.</p>}
+        </div>
+      )}
+
+      {selected && (
+        <ProviderModal
+          provider={selected}
+          auth={auth}
+          setView={setView}
+          onClose={() => setSelected(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function ProviderModal({ provider, auth, setView, onClose }) {
+  const [serviceNeeded, setServiceNeeded] = useState(provider.services[0] || "");
+  const [note, setNote] = useState("");
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState("");
+
+  const sendRequest = async () => {
+    setError("");
+    if (!auth.session || auth.session.type !== "patient") {
+      setError("Please log in as a patient/caregiver to send a request.");
+      return;
+    }
+    try {
+      await api("/requests", {
+        method: "POST",
+        token: auth.session.token,
+        body: { providerId: provider._id, serviceNeeded, note },
+      });
+      setSent(true);
+    } catch (e) { setError(e.message); }
+  };
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h2>{provider.name}</h2>
+        <p className="muted">{provider.type} · {provider.address}</p>
+        <p>{provider.specialization}</p>
+        <div style={{ margin: "10px 0" }}>
+          {provider.services.map((s) => <span className="badge" key={s}>{s}</span>)}
+        </div>
+        {provider.phone && <p><strong>Phone:</strong> {provider.phone}</p>}
+        {provider.website && <p><strong>Website:</strong> <a href={provider.website} target="_blank" rel="noreferrer">{provider.website}</a></p>}
+        <p className="muted">{provider.availability}</p>
+        {provider.notes && <p className="muted">{provider.notes}</p>}
+
+        <hr />
+        {sent ? (
+          <p>✅ Request sent. Track its status under <strong>My Requests</strong>.</p>
+        ) : (
+          <>
+            <h3>Send a connection request</h3>
+            <label>Service needed</label>
+            <select value={serviceNeeded} onChange={(e) => setServiceNeeded(e.target.value)}>
+              {provider.services.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <label>Note for the provider (optional)</label>
+            <textarea rows="3" value={note} onChange={(e) => setNote(e.target.value)}
+              placeholder="Briefly describe the patient's situation..." />
+            {error && <div className="error">{error}</div>}
+            <button className="btn" onClick={sendRequest}>Send Request</button>
+            {!auth.session && (
+              <p className="muted" style={{ marginTop: 8 }}>
+                <button className="toplink" onClick={() => { onClose(); setView("patientAuth"); }}>
+                  Log in / Register
+                </button> to send a request.
+              </p>
+            )}
+          </>
+        )}
+        <div style={{ marginTop: 14, textAlign: "right" }}>
+          <button className="btn secondary small" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PatientAuth({ auth, setView }) {
+  const [mode, setMode] = useState("login");
+  const [form, setForm] = useState({ name: "", email: "", password: "", phone: "", city: "", role: "caregiver" });
+  const [error, setError] = useState("");
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError("");
+    try {
+      const path = mode === "login" ? "/auth/patient/login" : "/auth/patient/register";
+      const data = await api(path, { method: "POST", body: form });
+      auth.login({ type: "patient", token: data.token, name: data.user.name, id: data.user.id });
+      setView("search");
+    } catch (e) { setError(e.message); }
+  };
+
+  return (
+    <div className="card" style={{ maxWidth: 420, margin: "0 auto" }}>
+      <h2>{mode === "login" ? "Patient / Caregiver Login" : "Create an account"}</h2>
+      <form onSubmit={submit}>
+        {mode === "register" && (
+          <>
+            <label>Full name</label>
+            <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            <label>I am a</label>
+            <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
+              <option value="caregiver">Caregiver</option>
+              <option value="patient">Patient</option>
+            </select>
+            <label>Phone</label>
+            <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+            <label>City</label>
+            <input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} />
+          </>
+        )}
+        <label>Email</label>
+        <input type="email" required value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+        <label>Password</label>
+        <input type="password" required value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+        {error && <div className="error">{error}</div>}
+        <button className="btn" type="submit">{mode === "login" ? "Log in" : "Register"}</button>
+      </form>
+      <p className="muted" style={{ marginTop: 12 }}>
+        {mode === "login" ? (
+          <>New here? <button className="toplink" onClick={() => setMode("register")}>Create an account</button></>
+        ) : (
+          <>Already have an account? <button className="toplink" onClick={() => setMode("login")}>Log in</button></>
+        )}
+      </p>
+    </div>
+  );
+}
+
+function ProviderAuth({ auth, setView }) {
+  const [form, setForm] = useState({ email: "", password: "" });
+  const [error, setError] = useState("");
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError("");
+    try {
+      const data = await api("/auth/provider/login", { method: "POST", body: form });
+      auth.login({ type: "provider", token: data.token, name: data.provider.name, id: data.provider.id });
+      setView("providerDashboard");
+    } catch (e) { setError(e.message); }
+  };
+
+  return (
+    <div className="card" style={{ maxWidth: 420, margin: "0 auto" }}>
+      <h2>Healthcare Provider Login</h2>
+      <p className="muted">
+        Use the email address registered against your listing. First-time login sets your password
+        (this "claims" your listing for the demo — see README).
+      </p>
+      <form onSubmit={submit}>
+        <label>Registered email</label>
+        <input type="email" required value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+        <label>Password</label>
+        <input type="password" required value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+        {error && <div className="error">{error}</div>}
+        <button className="btn" type="submit">Log in / Claim listing</button>
+      </form>
+    </div>
+  );
+}
+
+function PatientDashboard({ auth }) {
+  const [requests, setRequests] = useState([]);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    try {
+      const data = await api("/requests/mine", { token: auth.session.token });
+      setRequests(data);
+    } catch (e) { setError(e.message); }
+  }, [auth.session.token]);
+
+  useEffect(() => { load(); }, [load]);
+
+  return (
+    <div>
+      <h2>My Requests</h2>
+      {error && <div className="error">{error}</div>}
+      {requests.length === 0 && <p className="muted">You haven't contacted any providers yet — search above to get started.</p>}
+      {requests.map((r) => (
+        <div className="card" key={r._id}>
+          <strong>{r.provider?.name}</strong> <span className={`status ${r.status}`}>{r.status}</span>
+          <div className="muted">{r.serviceNeeded} · {r.provider?.city}</div>
+          {r.provider?.phone && <div className="muted">Phone: {r.provider.phone}</div>}
+          <MessageThread request={r} auth={auth} onSent={load} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ProviderDashboard({ auth }) {
+  const [requests, setRequests] = useState([]);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    try {
+      const data = await api("/requests/incoming", { token: auth.session.token });
+      setRequests(data);
+    } catch (e) { setError(e.message); }
+  }, [auth.session.token]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const setStatus = async (id, status) => {
+    try {
+      await api(`/requests/${id}/status`, { method: "PATCH", token: auth.session.token, body: { status } });
+      load();
+    } catch (e) { setError(e.message); }
+  };
+
+  return (
+    <div>
+      <h2>Incoming Patient Requests</h2>
+      {error && <div className="error">{error}</div>}
+      {requests.length === 0 && <p className="muted">No requests yet.</p>}
+      {requests.map((r) => (
+        <div className="card" key={r._id}>
+          <strong>{r.patientName}</strong> <span className={`status ${r.status}`}>{r.status}</span>
+          <div className="muted">Needs: {r.serviceNeeded}</div>
+          {r.patient?.phone && <div className="muted">Phone: {r.patient.phone}</div>}
+          {r.note && <p>"{r.note}"</p>}
+          {r.status === "Pending" && (
+            <div style={{ marginBottom: 10 }}>
+              <button className="btn small" onClick={() => setStatus(r._id, "Accepted")}>Accept</button>{" "}
+              <button className="btn small danger" onClick={() => setStatus(r._id, "Rejected")}>Reject</button>
+            </div>
+          )}
+          {r.status === "Accepted" && (
+            <button className="btn small secondary" onClick={() => setStatus(r._id, "Completed")}>Mark Completed</button>
+          )}
+          <MessageThread request={r} auth={auth} onSent={load} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MessageThread({ request, auth, onSent }) {
+  const [text, setText] = useState("");
+  const send = async () => {
+    if (!text.trim()) return;
+    await api(`/requests/${request._id}/messages`, { method: "POST", token: auth.session.token, body: { text } });
+    setText("");
+    onSent();
+  };
+  return (
+    <div style={{ marginTop: 10, borderTop: "1px solid var(--border)", paddingTop: 10 }}>
+      {request.messages?.map((m, i) => (
+        <div key={i} className={`msg ${m.sender}`}>{m.text}</div>
+      ))}
+      <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+        <input placeholder="Type a message..." value={text} onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && send()} style={{ marginBottom: 0 }} />
+        <button className="btn small" onClick={send}>Send</button>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const auth = useAuth();
+  const [view, setView] = useState("search");
+
+  return (
+    <React.Fragment>
+      <Header view={view} setView={setView} auth={auth} />
+      <main>
+        {view === "search" && <SearchView auth={auth} setView={setView} />}
+        {view === "patientAuth" && <PatientAuth auth={auth} setView={setView} />}
+        {view === "providerAuth" && <ProviderAuth auth={auth} setView={setView} />}
+        {view === "patientDashboard" && auth.session?.type === "patient" && <PatientDashboard auth={auth} />}
+        {view === "providerDashboard" && auth.session?.type === "provider" && <ProviderDashboard auth={auth} />}
+      </main>
+      <footer>StrokeConnect — MVP prototype for stroke care access in Chandigarh &amp; Punjab. Not for use in a real medical emergency — always call your local emergency number first.</footer>
+    </React.Fragment>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
