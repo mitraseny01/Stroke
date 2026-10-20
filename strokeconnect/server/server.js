@@ -18,7 +18,7 @@ app.use('/api/providers', providerRoutes);
 app.use('/api/requests', requestRoutes);
 
 const PORT = process.env.PORT || 5000;
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/strokeconnect';
+const MONGO_URI = process.env.MONGO_URI;
 
 mongoose
   .connect(MONGO_URI)
